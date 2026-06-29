@@ -1,26 +1,41 @@
-@import "tailwindcss";
+html, body { margin: 0; height: 100%; background: #2A3A19; }
+* { box-sizing: border-box; }
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+::selection { background: #3E5226; color: #F3EEDF; }
+input::placeholder { color: rgba(36, 40, 28, .4); }
+
+@keyframes mgrFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* hover effects (inline styles can't do :hover) */
+.mgr-arrow { transition: background .2s ease, transform .2s ease, box-shadow .2s ease; }
+.mgr-arrow:hover { background: rgba(251, 250, 245, .92) !important; color: #3E5226 !important; transform: scale(1.08); box-shadow: 0 8px 26px rgba(20, 30, 20, .3); }
+.mgr-ul:hover { color: #fff !important; }
+.mgr-quit:hover { color: #F3EEDF !important; }
+.mgr-close:hover { background: #3E5226 !important; color: #F3EEDF !important; }
+.mgr-dark:hover { background: #2A3A19 !important; }
+.mgr-prop:hover { background: #3E5226 !important; }
+.mgr-join:hover { background: #2A3A19 !important; }
+.mgr-yes:hover { background: #2A3A19 !important; }
+.mgr-no:hover { border-color: #3E5226 !important; background: rgba(62, 82, 38, .07) !important; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* hide scrollbars on horizontal planning board */
+.mgr-scroll-x::-webkit-scrollbar { height: 8px; }
+.mgr-scroll-x::-webkit-scrollbar-thumb { background: rgba(62, 82, 38, .3); border-radius: 4px; }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* bottom tab bar : phone only */
+.mgr-bottomnav { display: none; }
+
+@media (max-width: 600px) {
+  .mgr-topnav { display: none !important; }
+  .mgr-bottomnav { display: flex !important; }
+  .mgr-scroll { padding-bottom: 66px !important; }
+  .mgr-header { padding: 0 16px !important; gap: 10px !important; }
+  .mgr-logo { font-size: 21px !important; }
+  .mgr-sponsor { display: none !important; }
+  .mgr-garnish { display: none !important; }
+  .mgr-hero-title { font-size: 56px !important; }
+  .mgr-hero-star { font-size: 24px !important; }
 }
