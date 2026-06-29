@@ -16,9 +16,11 @@ export type Guest = {
 };
 export type Evening = { chef: string; theme: string; photo?: string; members: string[] };
 export type Message = { id: string; guestId: string; text: string; ts: number };
-export type Data = { guests: Guest[]; evenings: Record<string, Evening>; messages: Message[] };
+export type QuestClaim = { guestId: string; photo?: string; ts: number };
+export type Quest = { id: string; title: string; points: number; slots: number | null; createdBy: string | null; claims: QuestClaim[] };
+export type Data = { guests: Guest[]; evenings: Record<string, Evening>; messages: Message[]; quests: Quest[] };
 
-export const emptyData = (): Data => ({ guests: [], evenings: {}, messages: [] });
+export const emptyData = (): Data => ({ guests: [], evenings: {}, messages: [], quests: [] });
 
 /* --------------------------- supabase client ---------------------------- */
 
@@ -47,6 +49,16 @@ type GuestRow = {
 };
 type EveningRow = { day: string; chef: string | null; theme: string | null; photo: string | null; members: string[] | null };
 type MessageRow = { id: string; guest_id: string | null; text: string | null; ts: number | string | null };
+type QuestRow = { id: string; title: string; points: number | null; slots: number | null; created_by: string | null; claims: QuestClaim[] | null };
+const rowToQuest = (r: QuestRow): Quest => ({
+  id: r.id,
+  title: r.title,
+  points: r.points ?? 5,
+  slots: r.slots ?? null,
+  createdBy: r.created_by,
+  claims: r.claims || [],
+});
+const questToRow = (q: Quest): QuestRow => ({ id: q.id, title: q.title, points: q.points, slots: q.slots, created_by: q.createdBy, claims: q.claims });
 
 const rowToGuest = (r: GuestRow): Guest => ({
   id: r.id,
@@ -110,7 +122,12 @@ function seedLocal(): Data {
     "jeu6-aprem": { chef: "alice", theme: "Cours d'astronomie", photo: "/assets/ev-astro.png", members: [] },
     "sam8-soir": { chef: "alice", theme: "Festival", photo: "/assets/ev-festival.png", members: [] },
   };
-  return { guests, evenings, messages: [] };
+  const quests: Quest[] = [
+    { id: "q_machine", title: "Débarrasser la machine", points: 5, slots: 7, createdBy: null, claims: [] },
+    { id: "q_salade", title: "Faire une salade pour le déj", points: 5, slots: 4, createdBy: null, claims: [] },
+    { id: "q_tennis", title: "Battre Adrien au tennis", points: 10, slots: 1, createdBy: null, claims: [] },
+  ];
+  return { guests, evenings, messages: [], quests };
 }
 function readLocal(): Data {
   try {
@@ -134,10 +151,11 @@ function writeLocal(d: Data) {
 
 export async function fetchData(): Promise<Data> {
   if (sb) {
-    const [g, e, m] = await Promise.all([
+    const [g, e, m, q] = await Promise.all([
       sb.from("guests").select("*"),
       sb.from("evenings").select("*"),
       sb.from("messages").select("*").order("ts", { ascending: true }),
+      sb.from("quests").select("*"),
     ]);
     const guests = ((g.data as GuestRow[]) || []).map(rowToGuest);
     const evenings: Record<string, Evening> = {};
@@ -151,7 +169,8 @@ export async function fetchData(): Promise<Data> {
       text: r.text || "",
       ts: Number(r.ts) || 0,
     }));
-    return { guests, evenings, messages };
+    const quests = ((q.data as QuestRow[]) || []).map(rowToQuest);
+    return { guests, evenings, messages, quests };
   }
   return readLocal();
 }
@@ -163,6 +182,7 @@ export function subscribe(onChange: () => void): () => void {
       .on("postgres_changes", { event: "*", schema: "public", table: "guests" }, onChange)
       .on("postgres_changes", { event: "*", schema: "public", table: "evenings" }, onChange)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "quests" }, onChange)
       .subscribe();
     return () => {
       sb.removeChannel(ch);
@@ -214,6 +234,29 @@ export async function upsertEvening(day: string, ev: Evening): Promise<void> {
   }
   const d = readLocal();
   d.evenings[day] = ev;
+  writeLocal(d);
+}
+
+export async function upsertQuest(q: Quest): Promise<void> {
+  if (sb) {
+    await sb.from("quests").upsert(questToRow(q));
+    return;
+  }
+  const d = readLocal();
+  if (!d.quests) d.quests = [];
+  const i = d.quests.findIndex((x) => x.id === q.id);
+  if (i >= 0) d.quests[i] = q;
+  else d.quests.push(q);
+  writeLocal(d);
+}
+
+export async function deleteQuest(id: string): Promise<void> {
+  if (sb) {
+    await sb.from("quests").delete().eq("id", id);
+    return;
+  }
+  const d = readLocal();
+  d.quests = (d.quests || []).filter((q) => q.id !== id);
   writeLocal(d);
 }
 

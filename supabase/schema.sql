@@ -49,3 +49,24 @@ create policy "anon messages" on messages for all using (true) with check (true)
 alter publication supabase_realtime add table guests;
 alter publication supabase_realtime add table evenings;
 alter publication supabase_realtime add table messages;
+
+-- ===== Quêtes (onglet "Get some coins") =====
+create table if not exists quests (
+  id         text primary key,
+  title      text not null,
+  points     int default 5,
+  slots      int,            -- null = illimité
+  created_by text,
+  claims     jsonb default '[]'::jsonb,
+  created_at timestamptz default now()
+);
+alter table quests enable row level security;
+drop policy if exists "anon quests" on quests;
+create policy "anon quests" on quests for all using (true) with check (true);
+alter publication supabase_realtime add table quests;
+
+insert into quests (id, title, points, slots, created_by) values
+  ('q_machine', 'Débarrasser la machine',       5,  7, null),
+  ('q_salade',  'Faire une salade pour le déj',  5,  4, null),
+  ('q_tennis',  'Battre Adrien au tennis',      10,  1, null)
+on conflict (id) do nothing;

@@ -262,10 +262,14 @@ export default function MagrinHome() {
   const [loginName, setLoginName] = useState("");
   const [loginPwd, setLoginPwd] = useState("");
   const [loginErr, setLoginErr] = useState("");
-  const [activeTab, setActiveTab] = useState<"carte" | "planning" | "social" | "classement">("planning");
+  const [activeTab, setActiveTab] = useState<"carte" | "planning" | "social" | "classement" | "coins">("planning");
   const [chefDraftKey, setChefDraftKey] = useState<string | null>(null);
   const [chefDraftTheme, setChefDraftTheme] = useState("");
   const [chefDraftPhoto, setChefDraftPhoto] = useState<string | null>(null);
+  const [showQuestForm, setShowQuestForm] = useState(false);
+  const [newQuestTitle, setNewQuestTitle] = useState("");
+  const [newQuestPoints, setNewQuestPoints] = useState("5");
+  const [newQuestSlots, setNewQuestSlots] = useState("");
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -432,6 +436,45 @@ export default function MagrinHome() {
     });
     store.upsertEvening(day, next);
   };
+  const claimQuest = (questId: string, photo: string | null) => {
+    if (!meId) return;
+    const q = data?.quests?.find((x) => x.id === questId);
+    if (!q) return;
+    if (q.claims.some((c) => c.guestId === meId)) return;
+    if (q.slots != null && q.claims.length >= q.slots) return;
+    const next = { ...q, claims: [...q.claims, { guestId: meId, photo: photo || undefined, ts: Date.now() }] };
+    applyLocal((d) => {
+      const qq = d.quests?.find((x) => x.id === questId);
+      if (qq) qq.claims = next.claims;
+    });
+    store.upsertQuest(next);
+  };
+  const addQuest = () => {
+    if (!meId) return;
+    const title = newQuestTitle.trim();
+    if (!title) return;
+    const points = Math.max(1, Math.min(50, parseInt(newQuestPoints, 10) || 5));
+    const slotsNum = parseInt(newQuestSlots, 10);
+    const slots = newQuestSlots.trim() && slotsNum > 0 ? slotsNum : null;
+    const q = { id: "q" + Date.now(), title, points, slots, createdBy: meId, claims: [] as { guestId: string; photo?: string; ts: number }[] };
+    applyLocal((d) => {
+      if (!d.quests) d.quests = [];
+      d.quests.push(q);
+    });
+    store.upsertQuest(q);
+    setNewQuestTitle("");
+    setNewQuestPoints("5");
+    setNewQuestSlots("");
+    setShowQuestForm(false);
+  };
+  const removeQuest = (id: string) => {
+    const q = data?.quests?.find((x) => x.id === id);
+    if (!q || q.createdBy !== meId) return;
+    applyLocal((d) => {
+      d.quests = (d.quests || []).filter((x) => x.id !== id);
+    });
+    store.deleteQuest(id);
+  };
   const sendChat = () => {
     const t = chatInput.trim();
     if (!t || !meId) return;
@@ -565,8 +608,9 @@ export default function MagrinHome() {
       const teams = Object.values(evenings).filter((ev) => ev && ev.chef !== g.id && (ev.members || []).includes(g.id)).length;
       const trainPts = g.trainStatus === "reserve" && g.trainDay ? 5 : 0;
       const speed = speedBonus[g.id] || 0;
-      const total = orga * 10 + teams * 4 + trainPts + speed;
-      return { id: g.id, name: g.name, initials: initials(g.name), orga, teams, trainPts, speed, total };
+      const questPts = (data?.quests || []).reduce((sum, q) => sum + (q.claims.some((c) => c.guestId === g.id) ? q.points : 0), 0);
+      const total = orga * 10 + teams * 4 + trainPts + speed + questPts;
+      return { id: g.id, name: g.name, initials: initials(g.name), orga, teams, trainPts, speed, questPts, total };
     })
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
 
@@ -621,7 +665,7 @@ export default function MagrinHome() {
   const trainReserved = hasMe && me!.trainStatus === "reserve";
 
   useEffect(() => {
-    if (tab === "social") chatEndRef.current?.scrollIntoView({ block: "nearest" });
+    if (tab === "carte") chatEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [chatMsgs.length, tab]);
 
   // Carte interactive : présence en temps réel (avatars qui se baladent)
@@ -748,6 +792,7 @@ export default function MagrinHome() {
               <button onClick={() => setActiveTab("planning")} style={tabStyle(tab === "planning")}>Planning</button>
               <button onClick={() => setActiveTab("social")} style={tabStyle(tab === "social")}>Social</button>
               <button onClick={() => setActiveTab("classement")} style={tabStyle(tab === "classement")}>Classement</button>
+              <button onClick={() => setActiveTab("coins")} style={tabStyle(tab === "coins")}>🪙 Coins</button>
             </nav>
             <div style={css("display:flex; align-items:center; gap:10px;")}>
               <span style={css("width:34px; height:34px; border-radius:50%; background:#6E8B3A; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:12px;")}>{initials(me!.name)}</span>
@@ -758,18 +803,21 @@ export default function MagrinHome() {
           <div className="mgr-scroll" style={css("flex:1; min-height:0; overflow-y:auto; background:#E7E1CE;")}>
             {/* ----- TAB CARTE ----- */}
             {tab === "carte" && (
-              <div style={css("max-width:1080px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
+              <div style={css("max-width:1180px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
                 <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Le domaine</div>
-                <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>La carte de la ferme</h2>
-                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 10px;")}>Vue du ciel — le lac, le tennis, la maison, la piscine, le bar… et la nouvelle guinguette au bord de l&apos;eau.</p>
-                <div style={css("display:flex; align-items:center; gap:8px; margin:0 0 18px; font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; color:#6E8B3A;")}>
-                  <span style={css("width:8px; height:8px; border-radius:50%; background:#6E8B3A; display:inline-block;")} />
-                  {Object.keys(peers).length > 0
-                    ? `👀 ${Object.keys(peers).length} ami·e${Object.keys(peers).length > 1 ? "s" : ""} sur la carte en ce moment`
-                    : "Balade-toi sur la carte — les autres te voient en direct 👀"}
-                </div>
+                <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 18px; line-height:1.05;")}>La carte de la ferme</h2>
 
-                <div ref={mapRef} style={{ ...css("position:relative; width:100%; max-width:720px; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);"), touchAction: "none" }}>
+                <div style={css("display:flex; flex-wrap:wrap; gap:24px; align-items:stretch;")}>
+                  <div style={css("flex:1 1 420px; min-width:300px; max-width:720px;")}>
+                    <p style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.75); margin:0 0 10px;")}>Vue du ciel — le lac, le tennis, la maison, la piscine, le bar… et la guinguette au bord de l&apos;eau.</p>
+                    <div style={css("display:flex; align-items:center; gap:8px; margin:0 0 14px; font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; color:#6E8B3A;")}>
+                      <span style={css("width:8px; height:8px; border-radius:50%; background:#6E8B3A; display:inline-block;")} />
+                      {Object.keys(peers).length > 0
+                        ? `👀 ${Object.keys(peers).length} ami·e${Object.keys(peers).length > 1 ? "s" : ""} sur la carte en ce moment`
+                        : "Balade-toi sur la carte — les autres te voient en direct 👀"}
+                    </div>
+
+                    <div ref={mapRef} style={{ ...css("position:relative; width:100%; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);"), touchAction: "none" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/assets/farm-aerial.png" alt="Vue aérienne de la ferme de Magrin" style={css("position:absolute; inset:0; width:100%; height:100%; object-fit:cover;")} />
 
@@ -823,27 +871,57 @@ export default function MagrinHome() {
                   <div style={css("position:absolute; right:12px; bottom:11px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.16em; color:rgba(255,255,255,.9); text-transform:uppercase; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:4px;")}>La ferme de Magrin · vue du ciel</div>
                 </div>
 
-                <h3 style={css("font-family:'DM Serif Display',serif; font-size:clamp(22px,3vw,30px); margin:42px 0 16px;")}>Petit guide pour arriver</h3>
+                  </div>
+
+                  {/* chat à droite de la carte */}
+                  <div style={css("flex:1 1 320px; min-width:280px; display:flex; flex-direction:column;")}>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.22em; color:#6E8B3A; text-transform:uppercase; margin:0 0 12px;")}>💬 Le fil · {(data?.messages || []).length} messages</div>
+                    <div style={css("flex:1; background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:18px; box-shadow:0 18px 44px -30px rgba(0,0,0,.5); display:flex; flex-direction:column;")}>
+                      <div style={css("flex:1; display:flex; flex-direction:column; gap:16px; min-height:220px; max-height:560px; overflow-y:auto; padding-right:4px; margin-bottom:16px;")}>
+                        {chatMsgs.map((m, i) => (
+                          <div key={i} style={css("display:flex; gap:11px; align-items:flex-start;")}>
+                            <span style={{ ...css("width:36px; height:36px; border-radius:50%; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:12px; flex-shrink:0;"), background: m.bg }}>{m.initials}</span>
+                            <div style={css("flex:1; min-width:0;")}>
+                              <div style={css("display:flex; gap:8px; align-items:baseline; margin-bottom:2px;")}>
+                                <span style={css("font-family:'DM Serif Display',serif; font-size:18px; color:#2A3A19;")}>{m.name}</span>
+                                <span style={css("font-family:'Space Mono',monospace; font-size:10px; color:rgba(36,40,28,.4);")}>{m.time}</span>
+                              </div>
+                              <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.85); word-break:break-word;")}>{m.text}</div>
+                            </div>
+                          </div>
+                        ))}
+                        <div ref={chatEndRef} />
+                      </div>
+                      <div style={css("display:flex; gap:10px; border-top:1px solid rgba(62,82,38,.14); padding-top:14px;")}>
+                        <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }} placeholder="Écris un message…" style={css("flex:1; min-width:0; font-family:'Cormorant Garamond',serif; font-size:18px; padding:11px 14px; border:1px solid rgba(62,82,38,.3); border-radius:4px; background:#F3EEDF; color:#241B16; outline:none;")} />
+                        <button onClick={sendChat} disabled={!chatInput.trim()} style={{ fontFamily: "'Space Mono',monospace", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", padding: "0 18px", border: "none", borderRadius: "4px", cursor: chatInput.trim() ? "pointer" : "not-allowed", background: chatInput.trim() ? "#3E5226" : "rgba(62,82,38,.3)", color: "#F3EEDF", whiteSpace: "nowrap" }}>Envoyer</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Kit de survie de Magrin */}
+                <h3 style={css("font-family:'DM Serif Display',serif; font-size:clamp(22px,3vw,30px); margin:42px 0 16px;")}>🎒 Ton kit de survie de Magrin</h3>
                 <div style={css("display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:16px;")}>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:5px; padding:22px; box-shadow:0 14px 30px -22px rgba(0,0,0,.4);")}>
-                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>⌖ L&apos;adresse</div>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>La ferme</div>
-                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>Magrin · 81220<br />Tarn — Occitanie<br />(point GPS exact envoyé en privé)</div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>📍 L&apos;adresse</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>En Sayssinel</div>
+                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>149 chemin de Saint Salvy<br />Magrin · Tarn</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:5px; padding:22px; box-shadow:0 14px 30px -22px rgba(0,0,0,.4);")}>
-                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>🚆 En train</div>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>Gare de Damiatte–Saint-Paul</div>
-                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>Ligne Toulouse ↔ Castres / Mazamet. À ~15 min — on vient te chercher (onglet Social).</div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>🚆 Le train à prendre</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>Damiatte–Saint-Paul</div>
+                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>Ligne Toulouse ↔ Castres / Mazamet. On vient te chercher — renseigne ton train dans Social.</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:5px; padding:22px; box-shadow:0 14px 30px -22px rgba(0,0,0,.4);")}>
-                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>🚗 En voiture</div>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>≈ 1 h de Toulouse</div>
-                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>Parking sur place. Sièges libres ? Indique-le dans Social pour dépanner.</div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#6E8B3A; text-transform:uppercase; margin-bottom:10px;")}>🧳 Dans la valise</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>Le nécessaire</div>
+                    <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.78); margin-top:6px;")}>Maillot de bain, tenue de tennis, et une tenue pour les soirées à thème.</div>
                   </div>
                   <div style={css("background:#3E5226; color:#F3EEDF; border-radius:5px; padding:22px; box-shadow:0 14px 30px -22px rgba(0,0,0,.5);")}>
-                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#C9D596; text-transform:uppercase; margin-bottom:10px;")}>🎒 À prévoir</div>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>Dans le sac</div>
-                    <div style={css("font-size:18px; line-height:1.45; color:rgba(243,238,223,.86); margin-top:6px;")}>Maillot, tenue de tennis, et une idée de soirée à thème si tu te lances comme chef·fe.</div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.16em; color:#C9D596; text-transform:uppercase; margin-bottom:10px;")}>🏖️ Surtout</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:22px; line-height:1.15;")}>N&apos;oublie pas ta serviette !</div>
+                    <div style={css("font-size:18px; line-height:1.45; color:rgba(243,238,223,.86); margin-top:6px;")}>Piscine, lac, soleil… ta serviette est indispensable.</div>
                   </div>
                 </div>
               </div>
@@ -883,8 +961,8 @@ export default function MagrinHome() {
 
                           {slot.filled && (
                             <div>
-                              <div style={{ ...slot.coverStyle, aspectRatio: "auto", height: "62px", borderRadius: "2px" }}>
-                                <span style={css("font-family:'Gochi Hand',cursive; font-size:17px; line-height:1.05; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.6); padding:0 6px;")}>{slot.theme}</span>
+                              <div style={{ ...slot.coverStyle, aspectRatio: "auto", height: "140px", borderRadius: "2px", alignItems: "flex-end" }}>
+                                <span style={css("font-family:'Gochi Hand',cursive; font-size:20px; line-height:1.05; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.75); padding:8px;")}>{slot.theme}</span>
                               </div>
                               <div style={css("display:flex; align-items:center; gap:6px; margin-top:7px; margin-bottom:6px;")}>
                                 <span style={css("width:24px; height:24px; border-radius:50%; background:#3E5226; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:9px; flex-shrink:0;")}>{slot.chefInitials}</span>
@@ -927,7 +1005,7 @@ export default function MagrinHome() {
                             <div style={css("display:flex; flex-direction:column; gap:7px;")}>
                               <input value={chefDraftTheme} onChange={(e) => setChefDraftTheme(e.target.value)} placeholder="Activité ou soirée…" autoFocus style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:15px; padding:7px; border:1px solid rgba(62,82,38,.4); border-radius:3px; outline:none; text-align:center;")} />
                               {chefDraftPhoto ? (
-                                <div style={{ ...css("position:relative; width:100%; height:58px; border-radius:3px; background-size:cover; background-position:center;"), backgroundImage: `url(${chefDraftPhoto})` }}>
+                                <div style={{ ...css("position:relative; width:100%; height:120px; border-radius:3px; background-size:cover; background-position:center;"), backgroundImage: `url(${chefDraftPhoto})` }}>
                                   <button onClick={() => setChefDraftPhoto(null)} title="Retirer la photo" style={css("position:absolute; top:3px; right:3px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:11px; line-height:1; cursor:pointer;")}>✕</button>
                                 </div>
                               ) : (
@@ -1065,54 +1143,6 @@ export default function MagrinHome() {
                     </div>
                   ))}
                 </div>
-
-                {/* chat */}
-                <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.22em; color:#6E8B3A; text-transform:uppercase; margin:34px 0 14px;")}>Le fil · {(data?.messages || []).length} messages</div>
-                <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:18px; box-shadow:0 18px 44px -30px rgba(0,0,0,.5);")}>
-                  <div style={css("display:flex; flex-direction:column; gap:16px; max-height:360px; overflow-y:auto; padding-right:4px; margin-bottom:16px;")}>
-                    {chatMsgs.map((m, i) => (
-                      <div key={i} style={css("display:flex; gap:11px; align-items:flex-start;")}>
-                        <span style={{ ...css("width:36px; height:36px; border-radius:50%; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:12px; flex-shrink:0;"), background: m.bg }}>{m.initials}</span>
-                        <div style={css("flex:1; min-width:0;")}>
-                          <div style={css("display:flex; gap:8px; align-items:baseline; margin-bottom:2px;")}>
-                            <span style={css("font-family:'DM Serif Display',serif; font-size:18px; color:#2A3A19;")}>{m.name}</span>
-                            <span style={css("font-family:'Space Mono',monospace; font-size:10px; color:rgba(36,40,28,.4);")}>{m.time}</span>
-                          </div>
-                          <div style={css("font-size:18px; line-height:1.4; color:rgba(36,40,28,.85); word-break:break-word;")}>{m.text}</div>
-                        </div>
-                      </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                  </div>
-                  <div style={css("display:flex; gap:10px; border-top:1px solid rgba(62,82,38,.14); padding-top:14px;")}>
-                    <input
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
-                      placeholder="Écris un message…"
-                      style={css("flex:1; min-width:0; font-family:'Cormorant Garamond',serif; font-size:19px; padding:11px 14px; border:1px solid rgba(62,82,38,.3); border-radius:4px; background:#F3EEDF; color:#241B16; outline:none;")}
-                    />
-                    <button
-                      onClick={sendChat}
-                      disabled={!chatInput.trim()}
-                      style={{
-                        fontFamily: "'Space Mono',monospace",
-                        fontSize: "12px",
-                        letterSpacing: ".08em",
-                        textTransform: "uppercase",
-                        padding: "0 20px",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: chatInput.trim() ? "pointer" : "not-allowed",
-                        background: chatInput.trim() ? "#3E5226" : "rgba(62,82,38,.3)",
-                        color: "#F3EEDF",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Envoyer
-                    </button>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -1121,24 +1151,24 @@ export default function MagrinHome() {
               <div style={css("max-width:760px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
                 <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Entre nous</div>
                 <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>Le classement 🏆</h2>
-                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Plus tu participes, plus tu montes. Organise des créneaux, rejoins des équipes, et prends ton train tôt !</p>
+                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Plus tu participes, plus tu gagnes de 🪙. Organise des créneaux, rejoins des équipes, et réserve ton train tôt !</p>
 
                 <div style={css("display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:26px;")}>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🍽️ +10</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🍽️ +10 🪙</div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par créneau organisé (chef·fe)</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🤝 +4</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🤝 +4 🪙</div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par équipe rejointe</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🚗 +5</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🚗 +5 🪙</div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>train renseigné (covoit)</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>⚡ +5/3/1</div>
-                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>aux 3 trains les plus tôt</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>⚡ +5/3/1 🪙</div>
+                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>aux 3 trains réservés les plus tôt</div>
                   </div>
                 </div>
 
@@ -1160,18 +1190,103 @@ export default function MagrinHome() {
                               {r.teams > 0 && <span>🤝 {r.teams}</span>}
                               {r.trainPts > 0 && <span>🚗</span>}
                               {r.speed > 0 && <span>⚡ +{r.speed}</span>}
-                              {r.total === 0 && <span>en attente de points…</span>}
+                              {r.questPts > 0 && <span>🪙 +{r.questPts}</span>}
+                              {r.total === 0 && <span>en attente de 🪙…</span>}
                             </div>
                           </div>
                           <div style={css("text-align:right; flex-shrink:0;")}>
                             <div style={css("font-family:'DM Serif Display',serif; font-size:26px; line-height:1; color:#3E5226;")}>{r.total}</div>
-                            <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>points</div>
+                            <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>🪙 coins</div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ----- TAB COINS (quêtes) ----- */}
+            {tab === "coins" && (
+              <div style={css("max-width:760px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
+                <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Get some coins</div>
+                <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>Les quêtes 🪙</h2>
+                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Fais une quête, prends une photo en preuve 📷, et empoche des 🪙 (ça compte dans le classement). Tu peux aussi créer ta propre quête si tu as fait un truc bien !</p>
+
+                {!showQuestForm ? (
+                  <button onClick={() => setShowQuestForm(true)} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; padding:11px 18px; border:none; border-radius:4px; background:#6E8B3A; color:#F3EEDF; cursor:pointer; margin-bottom:22px;")}>+ Créer une quête</button>
+                ) : (
+                  <div style={css("background:#fff; border:1px solid rgba(62,82,38,.18); border-radius:8px; padding:18px; margin-bottom:22px; display:flex; flex-direction:column; gap:10px;")}>
+                    <input value={newQuestTitle} onChange={(e) => setNewQuestTitle(e.target.value)} placeholder="Titre de la quête (ex : sortir les poubelles)" style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:18px; padding:10px 12px; border:1px solid rgba(62,82,38,.3); border-radius:4px; outline:none;")} />
+                    <div style={css("display:flex; gap:10px; flex-wrap:wrap;")}>
+                      <label style={css("flex:1; min-width:120px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#6E8B3A;")}>
+                        🪙 Points
+                        <input type="number" min="1" max="50" value={newQuestPoints} onChange={(e) => setNewQuestPoints(e.target.value)} style={css("display:block; width:100%; margin-top:4px; font-family:'Space Mono',monospace; font-size:16px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:4px; outline:none; color:#241B16;")} />
+                      </label>
+                      <label style={css("flex:1; min-width:120px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#6E8B3A;")}>
+                        Places (vide = illimité)
+                        <input type="number" min="1" value={newQuestSlots} onChange={(e) => setNewQuestSlots(e.target.value)} placeholder="∞" style={css("display:block; width:100%; margin-top:4px; font-family:'Space Mono',monospace; font-size:16px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:4px; outline:none; color:#241B16;")} />
+                      </label>
+                    </div>
+                    <div style={css("display:flex; gap:8px;")}>
+                      <button onClick={addQuest} disabled={!newQuestTitle.trim()} style={ctaStyle(!newQuestTitle.trim(), true)}>Créer la quête</button>
+                      <button onClick={() => setShowQuestForm(false)} style={css("font-family:'Space Mono',monospace; font-size:11px; padding:10px 14px; border:1px solid rgba(62,82,38,.3); border-radius:4px; background:transparent; color:rgba(36,40,28,.6); cursor:pointer;")}>Annuler</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={css("display:flex; flex-direction:column; gap:12px;")}>
+                  {(data?.quests || []).map((q) => {
+                    const claimed = hasMe && q.claims.some((c) => c.guestId === me!.id);
+                    const full = q.slots != null && q.claims.length >= q.slots;
+                    const progress = q.slots != null ? `${q.claims.length}/${q.slots} fait${q.claims.length > 1 ? "s" : ""}` : `${q.claims.length} fait${q.claims.length > 1 ? "s" : ""}`;
+                    return (
+                      <div key={q.id} style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:8px; padding:16px 18px; box-shadow:0 14px 30px -24px rgba(0,0,0,.4);")}>
+                        <div style={css("display:flex; align-items:flex-start; gap:12px;")}>
+                          <div style={css("flex:1; min-width:0;")}>
+                            <div style={css("font-family:'DM Serif Display',serif; font-size:21px; line-height:1.15;")}>{q.title}</div>
+                            <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.06em; color:rgba(36,40,28,.55); margin-top:3px;")}>🪙 +{q.points} · {progress}</div>
+                          </div>
+                          {q.createdBy && hasMe && q.createdBy === me!.id && (
+                            <button onClick={() => { if (window.confirm("Supprimer cette quête ?")) removeQuest(q.id); }} title="Supprimer" style={css("background:none; border:none; cursor:pointer; font-size:14px; color:#9d3b2a; flex-shrink:0;")}>🗑</button>
+                          )}
+                        </div>
+
+                        {q.claims.length > 0 && (
+                          <div style={css("display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;")}>
+                            {q.claims.map((c, i) => {
+                              const g = guest(c.guestId);
+                              const ini = g ? initials(g.name) : "?";
+                              return c.photo ? (
+                                <div key={i} title={g ? g.name : ""} style={{ ...css("position:relative; width:54px; height:54px; border-radius:6px; background-size:cover; background-position:center; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.25);"), backgroundImage: `url(${c.photo})` }}>
+                                  <span style={css("position:absolute; bottom:-4px; right:-4px; width:20px; height:20px; border-radius:50%; background:#3E5226; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:8px; border:2px solid #fff;")}>{ini}</span>
+                                </div>
+                              ) : (
+                                <span key={i} title={g ? g.name : ""} style={css("width:34px; height:34px; border-radius:50%; background:#6E8B3A; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:11px;")}>{ini}</span>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div style={css("margin-top:14px;")}>
+                          {claimed ? (
+                            <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#3E5226;")}>✓ Quête validée — 🪙 +{q.points}</div>
+                          ) : full ? (
+                            <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>Complet — plus de place</div>
+                          ) : (
+                            <label className="mgr-prop" style={css("display:inline-flex; align-items:center; gap:6px; font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:10px 16px; border:none; border-radius:4px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>
+                              📷 Faire cette quête
+                              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], (url) => claimQuest(q.id, url))} />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(data?.quests || []).length === 0 && (
+                    <div style={css("background:#fff; border:1px dashed rgba(62,82,38,.3); border-radius:6px; padding:24px; font-size:18px; font-style:italic; color:rgba(36,40,28,.6);")}>Aucune quête pour l&apos;instant. Crée la première !</div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1182,6 +1297,7 @@ export default function MagrinHome() {
             <button onClick={() => setActiveTab("planning")} style={bottomTabStyle(tab === "planning")}>Planning</button>
             <button onClick={() => setActiveTab("social")} style={bottomTabStyle(tab === "social")}>Social</button>
             <button onClick={() => setActiveTab("classement")} style={bottomTabStyle(tab === "classement")}>🏆</button>
+            <button onClick={() => setActiveTab("coins")} style={bottomTabStyle(tab === "coins")}>🪙</button>
           </div>
         </>
       )}
