@@ -21,6 +21,12 @@ const DAYS = [
 ];
 const WEEK_HEADERS = ["L", "M", "M", "J", "V", "S", "D"];
 
+const SLOTS = [
+  { id: "matin", label: "Matin", icon: "🌅" },
+  { id: "aprem", label: "Après-midi", icon: "🌞" },
+  { id: "soir", label: "Soir", icon: "🌙" },
+];
+
 /* ------------------------------- helpers -------------------------------- */
 
 // Parse a CSS string ("prop:val; prop:val") into a React style object so the
@@ -256,12 +262,14 @@ export default function MagrinHome() {
   const [loginName, setLoginName] = useState("");
   const [loginPwd, setLoginPwd] = useState("");
   const [loginErr, setLoginErr] = useState("");
-  const [activeTab, setActiveTab] = useState<"carte" | "planning" | "social">("planning");
-  const [chefDraftDay, setChefDraftDay] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"carte" | "planning" | "social" | "classement">("planning");
+  const [chefDraftKey, setChefDraftKey] = useState<string | null>(null);
   const [chefDraftTheme, setChefDraftTheme] = useState("");
   const [chefDraftPhoto, setChefDraftPhoto] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const [peers, setPeers] = useState<Record<string, { name: string; initials: string; x: number; y: number; ts: number }>>({});
 
   useEffect(() => {
     let alive = true;
@@ -366,28 +374,37 @@ export default function MagrinHome() {
     setLoginPwd("");
     setLoginErr("");
   };
-  const becomeChef = (day: string, theme: string, photo: string | null) => {
+  const becomeChef = (key: string, theme: string, photo: string | null) => {
     if (!meId) return;
-    const t = (theme || "").trim() || "Soirée surprise";
+    const t = (theme || "").trim() || "Surprise";
     const ev: { chef: string; theme: string; members: string[]; photo?: string } = { chef: meId, theme: t, members: [] };
     if (photo) ev.photo = photo;
     applyLocal((d) => {
-      d.evenings[day] = ev;
+      d.evenings[key] = ev;
     });
-    store.upsertEvening(day, ev);
-    setChefDraftDay(null);
+    store.upsertEvening(key, ev);
+    setChefDraftKey(null);
     setChefDraftTheme("");
     setChefDraftPhoto(null);
   };
-  // Le/la chef·fe change ou ajoute la photo d'une soirée déjà créée.
-  const setEveningPhoto = (day: string, photo: string) => {
-    const ev = data?.evenings[day];
+  // Le/la chef·fe change ou ajoute la photo d'un créneau déjà créé.
+  const setEveningPhoto = (key: string, photo: string) => {
+    const ev = data?.evenings[key];
     if (!ev || ev.chef !== meId) return;
     const next = { ...ev, photo };
     applyLocal((d) => {
-      if (d.evenings[day]) d.evenings[day] = next;
+      if (d.evenings[key]) d.evenings[key] = next;
     });
-    store.upsertEvening(day, next);
+    store.upsertEvening(key, next);
+  };
+  // Le/la chef·fe supprime son créneau.
+  const removeEvening = (key: string) => {
+    const ev = data?.evenings[key];
+    if (!ev || ev.chef !== meId) return;
+    applyLocal((d) => {
+      delete d.evenings[key];
+    });
+    store.deleteEvening(key);
   };
   const onPickPhoto = async (file: File | undefined, cb: (url: string) => void) => {
     if (!file) return;
@@ -489,55 +506,69 @@ export default function MagrinHome() {
   });
   const attendancePeak = peakN > 0 ? "Pic : " + peakN + " convive" + (peakN > 1 ? "s" : "") + " le " + peakDay + " août" : "Pas encore de présences.";
 
-  // planning days
-  const offsets = [12, 86, 168, 104, 170, 44, 128, 64, 150];
-  const rots = [-2.4, 1.8, -1.4, 2.2, -2, 1.5, -1.8, 1.9, -1.2];
-  const days = DAYS.map((D, idx) => {
-    const ev = evenings[D.id];
-    const filled = !!ev && !!ev.chef;
-    const chef = filled ? guest(ev.chef) : null;
-    const memberObjs = filled ? (ev.members || []).map((id) => guest(id)).filter(Boolean) as Guest[] : [];
-    const youAreChef = filled && hasMe && ev.chef === me!.id;
-    const youAreMember = filled && hasMe && (ev.members || []).includes(me!.id);
-    const isDrafting = chefDraftDay === D.id;
-    const off = offsets[idx % offsets.length],
-      rot = rots[idx % rots.length];
-    return {
-      id: D.id,
-      dow: D.dow,
-      d: D.d,
-      theme: filled ? ev.theme : "",
-      coverStyle: filled ? coverStyle(ev.photo, D.id + (ev.theme || "")) : ({} as CSSProperties),
-      hasPhoto: filled && !!ev.photo,
-      cardStyle: {
-        marginTop: off + "px",
-        transform: "rotate(" + rot + "deg)",
-        background: "#fff",
-        padding: "9px 9px 0",
-        borderRadius: "2px",
-        boxShadow: "0 14px 30px -14px rgba(0,0,0,.5)",
-        border: "1px solid rgba(0,0,0,.05)",
-      } as CSSProperties,
-      slotStyle: {
-        marginTop: off + "px",
-        transform: "rotate(" + rot + "deg)",
-        background: "#fff",
-        padding: "9px",
-        borderRadius: "2px",
-        boxShadow: "0 12px 26px -16px rgba(0,0,0,.4)",
-        border: "1px solid rgba(0,0,0,.05)",
-      } as CSSProperties,
-      chefName: chef ? chef.name : "",
-      chefInitials: chef ? initials(chef.name) : "",
-      members: memberObjs.map((g) => ({ name: g.name, initials: initials(g.name) })),
-      filled,
-      youAreChef,
-      youAreMember,
-      showJoin: filled && !youAreChef && !youAreMember,
-      showOpenCTA: !filled && !isDrafting,
-      showDraft: !filled && isDrafting,
-    };
-  });
+  // planning days — 3 créneaux par jour (matin / après-midi / soir)
+  const days = DAYS.map((D) => ({
+    id: D.id,
+    dow: D.dow,
+    d: D.d,
+    slots: SLOTS.map((S) => {
+      const key = D.id + "-" + S.id;
+      const ev = evenings[key];
+      const filled = !!ev && !!ev.chef;
+      const chef = filled ? guest(ev!.chef) : null;
+      const memberObjs = filled ? ((ev!.members || []).map((id) => guest(id)).filter(Boolean) as Guest[]) : [];
+      const youAreChef = filled && hasMe && ev!.chef === me!.id;
+      const youAreMember = filled && hasMe && (ev!.members || []).includes(me!.id);
+      const isDrafting = chefDraftKey === key;
+      return {
+        key,
+        slotLabel: S.label,
+        slotIcon: S.icon,
+        theme: filled ? ev!.theme : "",
+        coverStyle: filled ? coverStyle(ev!.photo, key + (ev!.theme || "")) : ({} as CSSProperties),
+        hasPhoto: filled && !!ev!.photo,
+        chefName: chef ? chef.name : "",
+        chefInitials: chef ? initials(chef.name) : "",
+        members: memberObjs.map((g) => ({ name: g.name, initials: initials(g.name) })),
+        filled,
+        youAreChef,
+        youAreMember,
+        showJoin: filled && !youAreChef && !youAreMember,
+        showOpenCTA: !filled && !isDrafting,
+        showDraft: !filled && isDrafting,
+      };
+    }),
+  }));
+
+  // ----- classement (points) -----
+  const parseMin = (t: string): number | null => {
+    const m = /^(\d{1,2})[:hH.](\d{2})$/.exec((t || "").trim());
+    if (!m) return null;
+    const h = +m[1], mi = +m[2];
+    if (h > 23 || mi > 59) return null;
+    return h * 60 + mi;
+  };
+  // bonus rapidité : +5 / +3 / +1 aux 3 trains les plus tôt
+  const speedBonus: Record<string, number> = {};
+  guestsArr
+    .filter((g) => g.coming === "oui" && g.trainStatus === "reserve" && parseMin(g.trainTime) !== null)
+    .map((g) => ({ id: g.id, t: parseMin(g.trainTime)! }))
+    .sort((a, b) => a.t - b.t)
+    .forEach((g, i) => {
+      const pts = [5, 3, 1][i];
+      if (pts) speedBonus[g.id] = pts;
+    });
+  const ranking = guestsArr
+    .filter((g) => g.coming === "oui")
+    .map((g) => {
+      const orga = Object.values(evenings).filter((ev) => ev && ev.chef === g.id).length;
+      const teams = Object.values(evenings).filter((ev) => ev && ev.chef !== g.id && (ev.members || []).includes(g.id)).length;
+      const trainPts = g.trainStatus === "reserve" && g.trainDay ? 5 : 0;
+      const speed = speedBonus[g.id] || 0;
+      const total = orga * 10 + teams * 4 + trainPts + speed;
+      return { id: g.id, name: g.name, initials: initials(g.name), orga, teams, trainPts, speed, total };
+    })
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
 
   // covoiturage
   const cov: Record<string, Guest[]> = {};
@@ -592,6 +623,63 @@ export default function MagrinHome() {
   useEffect(() => {
     if (tab === "social") chatEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [chatMsgs.length, tab]);
+
+  // Carte interactive : présence en temps réel (avatars qui se baladent)
+  useEffect(() => {
+    if (tab !== "carte" || !hasMe || !store.supabase) return;
+    const sb = store.supabase;
+    const myId = me!.id;
+    const myName = me!.name;
+    const myInit = initials(me!.name);
+    const ch = sb.channel("magrin-map", { config: { broadcast: { self: false } } });
+    ch.on("broadcast", { event: "cursor" }, ({ payload }) => {
+      const p = payload as { id: string; name?: string; initials?: string; x?: number; y?: number; active?: boolean };
+      if (!p || p.id === myId) return;
+      setPeers((prev) => {
+        const next = { ...prev };
+        if (p.active === false) delete next[p.id];
+        else next[p.id] = { name: p.name || "", initials: p.initials || "?", x: p.x || 0, y: p.y || 0, ts: Date.now() };
+        return next;
+      });
+    }).subscribe();
+
+    const el = mapRef.current;
+    let last = 0;
+    const onMove = (e: PointerEvent) => {
+      if (!el) return;
+      const now = Date.now();
+      if (now - last < 45) return;
+      last = now;
+      const rect = el.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, name: myName, initials: myInit, x, y, active: true } });
+    };
+    const onLeave = () => ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, active: false } });
+    el?.addEventListener("pointermove", onMove);
+    el?.addEventListener("pointerleave", onLeave);
+
+    const interval = window.setInterval(() => {
+      setPeers((prev) => {
+        const now = Date.now();
+        let changed = false;
+        const next = { ...prev };
+        for (const k in next) if (now - next[k].ts > 6000) { delete next[k]; changed = true; }
+        return changed ? next : prev;
+      });
+    }, 2000);
+
+    return () => {
+      el?.removeEventListener("pointermove", onMove);
+      el?.removeEventListener("pointerleave", onLeave);
+      window.clearInterval(interval);
+      ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, active: false } });
+      sb.removeChannel(ch);
+      setPeers({});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, hasMe, meId]);
 
   /* -------------------------------- render ------------------------------- */
 
@@ -659,6 +747,7 @@ export default function MagrinHome() {
               <button onClick={() => setActiveTab("carte")} style={tabStyle(tab === "carte")}>Carte</button>
               <button onClick={() => setActiveTab("planning")} style={tabStyle(tab === "planning")}>Planning</button>
               <button onClick={() => setActiveTab("social")} style={tabStyle(tab === "social")}>Social</button>
+              <button onClick={() => setActiveTab("classement")} style={tabStyle(tab === "classement")}>Classement</button>
             </nav>
             <div style={css("display:flex; align-items:center; gap:10px;")}>
               <span style={css("width:34px; height:34px; border-radius:50%; background:#6E8B3A; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:12px;")}>{initials(me!.name)}</span>
@@ -672,9 +761,15 @@ export default function MagrinHome() {
               <div style={css("max-width:1080px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
                 <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Le domaine</div>
                 <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>La carte de la ferme</h2>
-                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 26px;")}>Vue du ciel — le lac, le tennis, la maison, la piscine, le bar… et la nouvelle guinguette au bord de l&apos;eau.</p>
+                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 10px;")}>Vue du ciel — le lac, le tennis, la maison, la piscine, le bar… et la nouvelle guinguette au bord de l&apos;eau.</p>
+                <div style={css("display:flex; align-items:center; gap:8px; margin:0 0 18px; font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; color:#6E8B3A;")}>
+                  <span style={css("width:8px; height:8px; border-radius:50%; background:#6E8B3A; display:inline-block;")} />
+                  {Object.keys(peers).length > 0
+                    ? `👀 ${Object.keys(peers).length} ami·e${Object.keys(peers).length > 1 ? "s" : ""} sur la carte en ce moment`
+                    : "Balade-toi sur la carte — les autres te voient en direct 👀"}
+                </div>
 
-                <div style={css("position:relative; width:100%; max-width:720px; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);")}>
+                <div ref={mapRef} style={{ ...css("position:relative; width:100%; max-width:720px; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);"), touchAction: "none" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/assets/farm-aerial.png" alt="Vue aérienne de la ferme de Magrin" style={css("position:absolute; inset:0; width:100%; height:100%; object-fit:cover;")} />
 
@@ -702,6 +797,29 @@ export default function MagrinHome() {
                     <span style={css("background:#C98A2B; color:#3a2408; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:4px 10px; border-radius:999px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.5);")}>Le bar</span>
                     <span style={css("width:13px; height:13px; border-radius:50%; background:#E9C46A; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,.6);")} />
                   </div>
+                  {/* avatars des amis en temps réel */}
+                  {Object.entries(peers).map(([id, p]) => (
+                    <div
+                      key={id}
+                      style={{
+                        position: "absolute",
+                        left: `${p.x * 100}%`,
+                        top: `${p.y * 100}%`,
+                        transform: "translate(-50%,-50%)",
+                        zIndex: 7,
+                        pointerEvents: "none",
+                        transition: "left .08s linear, top .08s linear",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "1px",
+                      }}
+                    >
+                      <span style={css("width:28px; height:28px; border-radius:50%; background:#C98A2B; color:#3a2408; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:10px; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.55);")}>{p.initials}</span>
+                      <span style={css("font-family:'Caveat',cursive; font-size:15px; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85); white-space:nowrap;")}>{p.name}</span>
+                    </div>
+                  ))}
+
                   <div style={css("position:absolute; right:12px; bottom:11px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.16em; color:rgba(255,255,255,.9); text-transform:uppercase; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:4px;")}>La ferme de Magrin · vue du ciel</div>
                 </div>
 
@@ -752,79 +870,80 @@ export default function MagrinHome() {
                   <img src="/assets/g-ghost.png" alt="" style={css("height:48px;")} />
                 </div>
 
-                <p style={css("text-align:center; font-family:'Caveat',cursive; font-size:23px; color:#6E8B3A; margin:0 0 6px;")}>Sur un soir libre, propose ta soirée et deviens chef·fe — ou rejoins une équipe.</p>
+                <p style={css("text-align:center; font-family:'Caveat',cursive; font-size:23px; color:#6E8B3A; margin:0 0 6px;")}>Sur un créneau libre (matin, après-midi ou soir), propose une activité ou une soirée et deviens chef·fe — ou rejoins une équipe.</p>
 
                 <div className="mgr-scroll-x" style={css("position:relative; display:flex; overflow-x:auto; padding:14px clamp(10px,2vw,24px) 60px; scroll-snap-type:x proximity;")}>
                   {days.map((day) => (
-                    <div key={day.id} style={css("flex:0 0 clamp(180px,15vw,232px); scroll-snap-align:start; border-left:1px solid rgba(40,34,24,.16); padding:0 12px; min-height:560px; display:flex; flex-direction:column;")}>
-                      <div style={css("text-align:center; font-family:'Caveat',cursive; font-weight:600; font-size:30px; color:#1d1b17; padding:8px 0 4px;")}>{day.dow} {day.d}</div>
+                    <div key={day.id} style={css("flex:0 0 clamp(192px,16vw,240px); scroll-snap-align:start; border-left:1px solid rgba(40,34,24,.16); padding:0 10px; min-height:560px; display:flex; flex-direction:column; gap:10px;")}>
+                      <div style={css("text-align:center; font-family:'Caveat',cursive; font-weight:600; font-size:28px; color:#1d1b17; padding:8px 0 0;")}>{day.dow} {day.d}</div>
 
-                      {day.filled && (
-                        <div style={day.cardStyle}>
-                          <div style={day.coverStyle}>
-                            <span style={css("font-family:'Gochi Hand',cursive; font-size:clamp(20px,2.4vw,28px); line-height:1.1; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.55);")}>{day.theme}</span>
-                          </div>
-                          <div style={css("padding:10px 4px 12px;")}>
-                            <div style={css("display:flex; align-items:center; gap:7px; margin-bottom:8px;")}>
-                              <span style={css("width:26px; height:26px; border-radius:50%; background:#3E5226; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:10px; flex-shrink:0;")}>{day.chefInitials}</span>
-                              <span style={css("font-family:'Caveat',cursive; font-size:20px; line-height:1; color:#3a3733;")}>par {day.chefName}</span>
-                            </div>
-                            <div style={css("display:flex; flex-wrap:wrap; gap:3px; margin-bottom:10px; min-height:4px;")}>
-                              {day.members.map((mb, i) => (
-                                <span key={i} title={mb.name} style={css("width:22px; height:22px; border-radius:50%; background:rgba(62,82,38,.14); color:#3E5226; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:8.5px;")}>{mb.initials}</span>
-                              ))}
-                            </div>
-                            {day.showJoin && (
-                              <button onClick={() => joinTeam(day.id)} className="mgr-join" style={css("width:100%; font-family:'Space Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:8px; border:1px solid #3E5226; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Rejoindre</button>
-                            )}
-                            {day.youAreChef && (
-                              <div style={css("display:flex; flex-direction:column; gap:5px;")}>
-                                <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.08em; text-transform:uppercase; padding:8px; border:1px dashed #6B7A2C; border-radius:3px; color:#5a6724; text-align:center;")}>★ Chef·fe</div>
-                                <label style={css("display:flex; align-items:center; justify-content:center; gap:4px; font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.04em; text-transform:uppercase; padding:6px; border-radius:3px; color:#6E8B3A; cursor:pointer;")}>
-                                  📷 {day.hasPhoto ? "Changer la photo" : "Ajouter une photo"}
-                                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], (url) => setEveningPhoto(day.id, url))} />
-                                </label>
+                      {day.slots.map((slot) => (
+                        <div key={slot.key} style={css("background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:4px; padding:9px; box-shadow:0 8px 20px -16px rgba(0,0,0,.55);")}>
+                          <div style={css("font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.12em; text-transform:uppercase; color:#6E8B3A; text-align:center; margin-bottom:6px;")}>{slot.slotIcon} {slot.slotLabel}</div>
+
+                          {slot.filled && (
+                            <div>
+                              <div style={{ ...slot.coverStyle, aspectRatio: "auto", height: "62px", borderRadius: "2px" }}>
+                                <span style={css("font-family:'Gochi Hand',cursive; font-size:17px; line-height:1.05; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.6); padding:0 6px;")}>{slot.theme}</span>
                               </div>
-                            )}
-                            {day.youAreMember && (
-                              <button onClick={() => leaveTeam(day.id)} style={css("width:100%; font-family:'Space Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:8px; border:1px solid rgba(62,82,38,.4); border-radius:3px; background:transparent; color:rgba(36,40,28,.6); cursor:pointer;")}>✓ quitter</button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {!day.filled && (
-                        <div style={day.slotStyle}>
-                          {day.showOpenCTA && (
-                            <div style={css("aspect-ratio:1/1.18; border:1.5px dashed rgba(62,82,38,.4); border-radius:1px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:10px; padding:14px 10px; background:rgba(62,82,38,.03);")}>
-                              <span style={css("width:38px; height:38px; border-radius:50%; border:1.5px dashed rgba(62,82,38,.5); display:flex; align-items:center; justify-content:center; font-size:20px; color:#6E8B3A;")}>+</span>
-                              <div style={css("font-family:'Caveat',cursive; font-size:26px; color:rgba(36,40,28,.6); line-height:.95;")}>soir libre</div>
-                              <div style={css("font-size:14px; line-height:1.25; color:rgba(36,40,28,.5);")}>Propose ta soirée à thème.</div>
-                              <button onClick={() => { setChefDraftDay(day.id); setChefDraftTheme(""); setChefDraftPhoto(null); }} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; padding:9px 12px; border:none; border-radius:3px; background:#6E8B3A; color:#F3EEDF; cursor:pointer;")}>+ Proposer</button>
+                              <div style={css("display:flex; align-items:center; gap:6px; margin-top:7px; margin-bottom:6px;")}>
+                                <span style={css("width:24px; height:24px; border-radius:50%; background:#3E5226; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:9px; flex-shrink:0;")}>{slot.chefInitials}</span>
+                                <span style={css("font-family:'Caveat',cursive; font-size:18px; line-height:1; color:#3a3733;")}>par {slot.chefName}</span>
+                              </div>
+                              {slot.members.length > 0 && (
+                                <div style={css("display:flex; flex-wrap:wrap; gap:3px; margin-bottom:8px;")}>
+                                  {slot.members.map((mb, i) => (
+                                    <span key={i} title={mb.name} style={css("width:20px; height:20px; border-radius:50%; background:rgba(62,82,38,.14); color:#3E5226; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:8px;")}>{mb.initials}</span>
+                                  ))}
+                                </div>
+                              )}
+                              {slot.showJoin && (
+                                <button onClick={() => joinTeam(slot.key)} className="mgr-join" style={css("width:100%; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; padding:7px; border:1px solid #3E5226; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Rejoindre</button>
+                              )}
+                              {slot.youAreMember && (
+                                <button onClick={() => leaveTeam(slot.key)} style={css("width:100%; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; padding:7px; border:1px solid rgba(62,82,38,.4); border-radius:3px; background:transparent; color:rgba(36,40,28,.6); cursor:pointer;")}>✓ quitter</button>
+                              )}
+                              {slot.youAreChef && (
+                                <div style={css("display:flex; flex-direction:column; gap:5px;")}>
+                                  <div style={css("font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.08em; text-transform:uppercase; padding:6px; border:1px dashed #6B7A2C; border-radius:3px; color:#5a6724; text-align:center;")}>★ Chef·fe</div>
+                                  <label style={css("display:flex; align-items:center; justify-content:center; gap:4px; font-family:'Space Mono',monospace; font-size:8px; letter-spacing:.04em; text-transform:uppercase; color:#6E8B3A; cursor:pointer;")}>
+                                    📷 {slot.hasPhoto ? "Changer la photo" : "Ajouter une photo"}
+                                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], (url) => setEveningPhoto(slot.key, url))} />
+                                  </label>
+                                  <button onClick={() => { if (window.confirm("Supprimer ce créneau ?")) removeEvening(slot.key); }} style={css("font-family:'Space Mono',monospace; font-size:8px; letter-spacing:.06em; text-transform:uppercase; padding:5px; border:none; border-radius:3px; background:transparent; color:#9d3b2a; cursor:pointer;")}>🗑 Supprimer</button>
+                                </div>
+                              )}
                             </div>
                           )}
-                          {day.showDraft && (
-                            <div style={css("aspect-ratio:1/1.18; border:1.5px dashed rgba(62,82,38,.5); border-radius:1px; display:flex; flex-direction:column; justify-content:center; gap:8px; padding:12px;")}>
-                              <div style={css("font-family:'Caveat',cursive; font-size:22px; color:#3E5226; text-align:center; line-height:.9;")}>ta soirée</div>
-                              <input value={chefDraftTheme} onChange={(e) => setChefDraftTheme(e.target.value)} placeholder="Ex : guinguette…" style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:16px; padding:8px; border:1px solid rgba(62,82,38,.4); border-radius:3px; outline:none; text-align:center;")} />
+
+                          {!slot.filled && slot.showOpenCTA && (
+                            <div style={css("display:flex; flex-direction:column; align-items:center; text-align:center; gap:7px; padding:6px 4px;")}>
+                              <div style={css("font-family:'Caveat',cursive; font-size:20px; color:rgba(36,40,28,.5); line-height:.9;")}>libre</div>
+                              <button onClick={() => { setChefDraftKey(slot.key); setChefDraftTheme(""); setChefDraftPhoto(null); }} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.1em; text-transform:uppercase; padding:8px 12px; border:none; border-radius:3px; background:#6E8B3A; color:#F3EEDF; cursor:pointer;")}>+ Proposer</button>
+                            </div>
+                          )}
+
+                          {!slot.filled && slot.showDraft && (
+                            <div style={css("display:flex; flex-direction:column; gap:7px;")}>
+                              <input value={chefDraftTheme} onChange={(e) => setChefDraftTheme(e.target.value)} placeholder="Activité ou soirée…" autoFocus style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:15px; padding:7px; border:1px solid rgba(62,82,38,.4); border-radius:3px; outline:none; text-align:center;")} />
                               {chefDraftPhoto ? (
-                                <div style={{ ...css("position:relative; width:100%; height:64px; border-radius:3px; background-size:cover; background-position:center;"), backgroundImage: `url(${chefDraftPhoto})` }}>
+                                <div style={{ ...css("position:relative; width:100%; height:58px; border-radius:3px; background-size:cover; background-position:center;"), backgroundImage: `url(${chefDraftPhoto})` }}>
                                   <button onClick={() => setChefDraftPhoto(null)} title="Retirer la photo" style={css("position:absolute; top:3px; right:3px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:11px; line-height:1; cursor:pointer;")}>✕</button>
                                 </div>
                               ) : (
-                                <label style={css("display:flex; align-items:center; justify-content:center; gap:5px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.05em; text-transform:uppercase; padding:8px; border:1px dashed rgba(62,82,38,.45); border-radius:3px; color:#6E8B3A; cursor:pointer; text-align:center;")}>
-                                  📷 Ajouter une photo
+                                <label style={css("display:flex; align-items:center; justify-content:center; gap:5px; font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.05em; text-transform:uppercase; padding:7px; border:1px dashed rgba(62,82,38,.45); border-radius:3px; color:#6E8B3A; cursor:pointer;")}>
+                                  📷 Photo
                                   <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], setChefDraftPhoto)} />
                                 </label>
                               )}
                               <div style={css("display:flex; gap:6px;")}>
-                                <button onClick={() => becomeChef(day.id, chefDraftTheme, chefDraftPhoto)} style={css("flex:1; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.06em; text-transform:uppercase; padding:8px; border:none; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Chef·fe</button>
-                                <button onClick={() => { setChefDraftDay(null); setChefDraftTheme(""); setChefDraftPhoto(null); }} style={css("font-family:'Space Mono',monospace; font-size:9px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:3px; background:transparent; color:rgba(36,40,28,.55); cursor:pointer;")}>✕</button>
+                                <button onClick={() => becomeChef(slot.key, chefDraftTheme, chefDraftPhoto)} style={css("flex:1; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.06em; text-transform:uppercase; padding:8px; border:none; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Valider</button>
+                                <button onClick={() => { setChefDraftKey(null); setChefDraftTheme(""); setChefDraftPhoto(null); }} style={css("font-family:'Space Mono',monospace; font-size:9px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:3px; background:transparent; color:rgba(36,40,28,.55); cursor:pointer;")}>✕</button>
                               </div>
                             </div>
                           )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -996,6 +1115,65 @@ export default function MagrinHome() {
                 </div>
               </div>
             )}
+
+            {/* ----- TAB CLASSEMENT ----- */}
+            {tab === "classement" && (
+              <div style={css("max-width:760px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
+                <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Entre nous</div>
+                <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>Le classement 🏆</h2>
+                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Plus tu participes, plus tu montes. Organise des créneaux, rejoins des équipes, et prends ton train tôt !</p>
+
+                <div style={css("display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:26px;")}>
+                  <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🍽️ +10</div>
+                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par créneau organisé (chef·fe)</div>
+                  </div>
+                  <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🤝 +4</div>
+                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par équipe rejointe</div>
+                  </div>
+                  <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🚗 +5</div>
+                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>train renseigné (covoit)</div>
+                  </div>
+                  <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>⚡ +5/3/1</div>
+                    <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>aux 3 trains les plus tôt</div>
+                  </div>
+                </div>
+
+                {ranking.length === 0 ? (
+                  <div style={css("background:#fff; border:1px dashed rgba(62,82,38,.3); border-radius:6px; padding:24px; font-size:18px; font-style:italic; color:rgba(36,40,28,.6);")}>Pas encore de participant·es. Inscris-toi et lance-toi !</div>
+                ) : (
+                  <div style={css("display:flex; flex-direction:column; gap:10px;")}>
+                    {ranking.map((r, i) => {
+                      const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+                      const isMe = hasMe && r.id === me!.id;
+                      return (
+                        <div key={r.id} style={{ ...css("display:flex; align-items:center; gap:14px; border-radius:10px; padding:14px 16px; border:1px solid rgba(62,82,38,.16);"), background: isMe ? "#EDE0C2" : "#fff", boxShadow: i < 3 ? "0 14px 30px -22px rgba(0,0,0,.45)" : "none" }}>
+                          <div style={css("width:38px; text-align:center; font-family:'DM Serif Display',serif; font-size:22px; flex-shrink:0;")}>{medal}</div>
+                          <span style={css("width:42px; height:42px; border-radius:50%; background:#6E8B3A; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:14px; flex-shrink:0;")}>{r.initials}</span>
+                          <div style={css("flex:1; min-width:0;")}>
+                            <div style={css("font-size:20px; font-weight:600; line-height:1.1;")}>{r.name}{isMe ? " · toi" : ""}</div>
+                            <div style={css("display:flex; flex-wrap:wrap; gap:8px; margin-top:3px; font-family:'Space Mono',monospace; font-size:11px; color:rgba(36,40,28,.6);")}>
+                              {r.orga > 0 && <span>🍽️ {r.orga}</span>}
+                              {r.teams > 0 && <span>🤝 {r.teams}</span>}
+                              {r.trainPts > 0 && <span>🚗</span>}
+                              {r.speed > 0 && <span>⚡ +{r.speed}</span>}
+                              {r.total === 0 && <span>en attente de points…</span>}
+                            </div>
+                          </div>
+                          <div style={css("text-align:right; flex-shrink:0;")}>
+                            <div style={css("font-family:'DM Serif Display',serif; font-size:26px; line-height:1; color:#3E5226;")}>{r.total}</div>
+                            <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>points</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* bottom tab bar — phone only */}
@@ -1003,6 +1181,7 @@ export default function MagrinHome() {
             <button onClick={() => setActiveTab("carte")} style={bottomTabStyle(tab === "carte")}>Carte</button>
             <button onClick={() => setActiveTab("planning")} style={bottomTabStyle(tab === "planning")}>Planning</button>
             <button onClick={() => setActiveTab("social")} style={bottomTabStyle(tab === "social")}>Social</button>
+            <button onClick={() => setActiveTab("classement")} style={bottomTabStyle(tab === "classement")}>🏆</button>
           </div>
         </>
       )}

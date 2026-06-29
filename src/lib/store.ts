@@ -28,6 +28,8 @@ const URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://psbxaoxubacycgweqvp
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_fwQfCzaRftwDWQpwR0pWEw_7be7wiJ6";
 export const isRemote = !!(URL && ANON);
 const sb: SupabaseClient | null = isRemote ? createClient(URL!, ANON!) : null;
+/** Client Supabase brut (pour le temps réel / présence sur la carte). Null si non configuré. */
+export const supabase = sb;
 
 /* ----------------------------- row mapping ------------------------------ */
 
@@ -103,10 +105,10 @@ function seedLocal(): Data {
     },
   ];
   const evenings: Record<string, Evening> = {
-    lun3: { chef: "alice", theme: "Soirée Mythologie Grecque", photo: "/assets/ev-mytho.png", members: [] },
-    mer5: { chef: "alice", theme: "Film en plein air", photo: "/assets/ev-cinema.png", members: [] },
-    jeu6: { chef: "alice", theme: "Cours d'astronomie", photo: "/assets/ev-astro.png", members: [] },
-    sam8: { chef: "alice", theme: "Festival", photo: "/assets/ev-festival.png", members: [] },
+    "lun3-soir": { chef: "alice", theme: "Soirée Mythologie Grecque", photo: "/assets/ev-mytho.png", members: [] },
+    "mer5-soir": { chef: "alice", theme: "Film en plein air", photo: "/assets/ev-cinema.png", members: [] },
+    "jeu6-aprem": { chef: "alice", theme: "Cours d'astronomie", photo: "/assets/ev-astro.png", members: [] },
+    "sam8-soir": { chef: "alice", theme: "Festival", photo: "/assets/ev-festival.png", members: [] },
   };
   return { guests, evenings, messages: [] };
 }
@@ -212,6 +214,16 @@ export async function upsertEvening(day: string, ev: Evening): Promise<void> {
   }
   const d = readLocal();
   d.evenings[day] = ev;
+  writeLocal(d);
+}
+
+export async function deleteEvening(day: string): Promise<void> {
+  if (sb) {
+    await sb.from("evenings").delete().eq("day", day);
+    return;
+  }
+  const d = readLocal();
+  delete d.evenings[day];
   writeLocal(d);
 }
 
