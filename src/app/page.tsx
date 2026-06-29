@@ -174,6 +174,40 @@ function obDot(active: boolean, done: boolean): CSSProperties {
     color: active || done ? "#F3EEDF" : "rgba(62,82,38,.6)",
   };
 }
+// Lit un fichier image, le redimensionne/compresse, et renvoie une data-URL JPEG légère.
+function fileToDataURL(file: File, maxDim = 900, quality = 0.72): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("img"));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width >= height && width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else if (height > width && height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(reader.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function bottomTabStyle(active: boolean): CSSProperties {
   return {
     flex: "1",
@@ -225,6 +259,7 @@ export default function MagrinHome() {
   const [activeTab, setActiveTab] = useState<"carte" | "planning" | "social">("planning");
   const [chefDraftDay, setChefDraftDay] = useState<string | null>(null);
   const [chefDraftTheme, setChefDraftTheme] = useState("");
+  const [chefDraftPhoto, setChefDraftPhoto] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -331,16 +366,34 @@ export default function MagrinHome() {
     setLoginPwd("");
     setLoginErr("");
   };
-  const becomeChef = (day: string, theme: string) => {
+  const becomeChef = (day: string, theme: string, photo: string | null) => {
     if (!meId) return;
     const t = (theme || "").trim() || "Soirée surprise";
-    const ev = { chef: meId, theme: t, members: [] as string[] };
+    const ev: { chef: string; theme: string; members: string[]; photo?: string } = { chef: meId, theme: t, members: [] };
+    if (photo) ev.photo = photo;
     applyLocal((d) => {
       d.evenings[day] = ev;
     });
     store.upsertEvening(day, ev);
     setChefDraftDay(null);
     setChefDraftTheme("");
+    setChefDraftPhoto(null);
+  };
+  // Le/la chef·fe change ou ajoute la photo d'une soirée déjà créée.
+  const setEveningPhoto = (day: string, photo: string) => {
+    const ev = data?.evenings[day];
+    if (!ev || ev.chef !== meId) return;
+    const next = { ...ev, photo };
+    applyLocal((d) => {
+      if (d.evenings[day]) d.evenings[day] = next;
+    });
+    store.upsertEvening(day, next);
+  };
+  const onPickPhoto = async (file: File | undefined, cb: (url: string) => void) => {
+    if (!file) return;
+    try {
+      cb(await fileToDataURL(file));
+    } catch {}
   };
   const joinTeam = (day: string) => {
     if (!meId) return;
@@ -455,6 +508,7 @@ export default function MagrinHome() {
       d: D.d,
       theme: filled ? ev.theme : "",
       coverStyle: filled ? coverStyle(ev.photo, D.id + (ev.theme || "")) : ({} as CSSProperties),
+      hasPhoto: filled && !!ev.photo,
       cardStyle: {
         marginTop: off + "px",
         transform: "rotate(" + rot + "deg)",
@@ -724,7 +778,13 @@ export default function MagrinHome() {
                               <button onClick={() => joinTeam(day.id)} className="mgr-join" style={css("width:100%; font-family:'Space Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:8px; border:1px solid #3E5226; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Rejoindre</button>
                             )}
                             {day.youAreChef && (
-                              <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.08em; text-transform:uppercase; padding:8px; border:1px dashed #6B7A2C; border-radius:3px; color:#5a6724; text-align:center;")}>★ Chef·fe</div>
+                              <div style={css("display:flex; flex-direction:column; gap:5px;")}>
+                                <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.08em; text-transform:uppercase; padding:8px; border:1px dashed #6B7A2C; border-radius:3px; color:#5a6724; text-align:center;")}>★ Chef·fe</div>
+                                <label style={css("display:flex; align-items:center; justify-content:center; gap:4px; font-family:'Space Mono',monospace; font-size:8.5px; letter-spacing:.04em; text-transform:uppercase; padding:6px; border-radius:3px; color:#6E8B3A; cursor:pointer;")}>
+                                  📷 {day.hasPhoto ? "Changer la photo" : "Ajouter une photo"}
+                                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], (url) => setEveningPhoto(day.id, url))} />
+                                </label>
+                              </div>
                             )}
                             {day.youAreMember && (
                               <button onClick={() => leaveTeam(day.id)} style={css("width:100%; font-family:'Space Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:8px; border:1px solid rgba(62,82,38,.4); border-radius:3px; background:transparent; color:rgba(36,40,28,.6); cursor:pointer;")}>✓ quitter</button>
@@ -740,16 +800,26 @@ export default function MagrinHome() {
                               <span style={css("width:38px; height:38px; border-radius:50%; border:1.5px dashed rgba(62,82,38,.5); display:flex; align-items:center; justify-content:center; font-size:20px; color:#6E8B3A;")}>+</span>
                               <div style={css("font-family:'Caveat',cursive; font-size:26px; color:rgba(36,40,28,.6); line-height:.95;")}>soir libre</div>
                               <div style={css("font-size:14px; line-height:1.25; color:rgba(36,40,28,.5);")}>Propose ta soirée à thème.</div>
-                              <button onClick={() => { setChefDraftDay(day.id); setChefDraftTheme(""); }} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; padding:9px 12px; border:none; border-radius:3px; background:#6E8B3A; color:#F3EEDF; cursor:pointer;")}>+ Proposer</button>
+                              <button onClick={() => { setChefDraftDay(day.id); setChefDraftTheme(""); setChefDraftPhoto(null); }} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; padding:9px 12px; border:none; border-radius:3px; background:#6E8B3A; color:#F3EEDF; cursor:pointer;")}>+ Proposer</button>
                             </div>
                           )}
                           {day.showDraft && (
-                            <div style={css("aspect-ratio:1/1.18; border:1.5px dashed rgba(62,82,38,.5); border-radius:1px; display:flex; flex-direction:column; justify-content:center; gap:9px; padding:14px 12px;")}>
+                            <div style={css("aspect-ratio:1/1.18; border:1.5px dashed rgba(62,82,38,.5); border-radius:1px; display:flex; flex-direction:column; justify-content:center; gap:8px; padding:12px;")}>
                               <div style={css("font-family:'Caveat',cursive; font-size:22px; color:#3E5226; text-align:center; line-height:.9;")}>ta soirée</div>
                               <input value={chefDraftTheme} onChange={(e) => setChefDraftTheme(e.target.value)} placeholder="Ex : guinguette…" style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:16px; padding:8px; border:1px solid rgba(62,82,38,.4); border-radius:3px; outline:none; text-align:center;")} />
+                              {chefDraftPhoto ? (
+                                <div style={{ ...css("position:relative; width:100%; height:64px; border-radius:3px; background-size:cover; background-position:center;"), backgroundImage: `url(${chefDraftPhoto})` }}>
+                                  <button onClick={() => setChefDraftPhoto(null)} title="Retirer la photo" style={css("position:absolute; top:3px; right:3px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:11px; line-height:1; cursor:pointer;")}>✕</button>
+                                </div>
+                              ) : (
+                                <label style={css("display:flex; align-items:center; justify-content:center; gap:5px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.05em; text-transform:uppercase; padding:8px; border:1px dashed rgba(62,82,38,.45); border-radius:3px; color:#6E8B3A; cursor:pointer; text-align:center;")}>
+                                  📷 Ajouter une photo
+                                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPickPhoto(e.target.files?.[0], setChefDraftPhoto)} />
+                                </label>
+                              )}
                               <div style={css("display:flex; gap:6px;")}>
-                                <button onClick={() => becomeChef(day.id, chefDraftTheme)} style={css("flex:1; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.06em; text-transform:uppercase; padding:8px; border:none; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Chef·fe</button>
-                                <button onClick={() => { setChefDraftDay(null); setChefDraftTheme(""); }} style={css("font-family:'Space Mono',monospace; font-size:9px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:3px; background:transparent; color:rgba(36,40,28,.55); cursor:pointer;")}>✕</button>
+                                <button onClick={() => becomeChef(day.id, chefDraftTheme, chefDraftPhoto)} style={css("flex:1; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.06em; text-transform:uppercase; padding:8px; border:none; border-radius:3px; background:#3E5226; color:#F3EEDF; cursor:pointer;")}>Chef·fe</button>
+                                <button onClick={() => { setChefDraftDay(null); setChefDraftTheme(""); setChefDraftPhoto(null); }} style={css("font-family:'Space Mono',monospace; font-size:9px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:3px; background:transparent; color:rgba(36,40,28,.55); cursor:pointer;")}>✕</button>
                               </div>
                             </div>
                           )}
