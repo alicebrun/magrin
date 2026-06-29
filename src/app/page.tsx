@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import * as store from "@/lib/store";
 import type { Guest, Data } from "@/lib/store";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 /* ----------------------------- types & data ----------------------------- */
 
@@ -274,6 +275,12 @@ export default function MagrinHome() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const [peers, setPeers] = useState<Record<string, { name: string; initials: string; x: number; y: number; ts: number }>>({});
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
+  const viewRef = useRef({ scale: 1, tx: 0, ty: 0 });
+  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const [myPos, setMyPos] = useState<{ x: number; y: number } | null>(null);
+  const chanRef = useRef<RealtimeChannel | null>(null);
+  const lastSentRef = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -686,23 +693,7 @@ export default function MagrinHome() {
         return next;
       });
     }).subscribe();
-
-    const el = mapRef.current;
-    let last = 0;
-    const onMove = (e: PointerEvent) => {
-      if (!el) return;
-      const now = Date.now();
-      if (now - last < 45) return;
-      last = now;
-      const rect = el.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-      if (x < 0 || x > 1 || y < 0 || y > 1) return;
-      ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, name: myName, initials: myInit, x, y, active: true } });
-    };
-    const onLeave = () => ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, active: false } });
-    el?.addEventListener("pointermove", onMove);
-    el?.addEventListener("pointerleave", onLeave);
+    chanRef.current = ch;
 
     const interval = window.setInterval(() => {
       setPeers((prev) => {
@@ -715,15 +706,73 @@ export default function MagrinHome() {
     }, 2000);
 
     return () => {
-      el?.removeEventListener("pointermove", onMove);
-      el?.removeEventListener("pointerleave", onLeave);
       window.clearInterval(interval);
       ch.send({ type: "broadcast", event: "cursor", payload: { id: myId, active: false } });
       sb.removeChannel(ch);
+      chanRef.current = null;
       setPeers({});
+      setMyPos(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, hasMe, meId]);
+
+  // pan / zoom + diffusion de la position du curseur (carte interactive)
+  const applyView = (v: { scale: number; tx: number; ty: number }) => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    let { scale, tx, ty } = v;
+    scale = Math.max(1, Math.min(4, scale));
+    if (rect) {
+      const minX = rect.width * (1 - scale);
+      const minY = rect.height * (1 - scale);
+      tx = Math.max(minX, Math.min(0, tx));
+      ty = Math.max(minY, Math.min(0, ty));
+    }
+    const next = { scale, tx, ty };
+    viewRef.current = next;
+    setView(next);
+  };
+  const zoomBy = (factor: number) => {
+    const v = viewRef.current;
+    const rect = mapRef.current?.getBoundingClientRect();
+    const newScale = Math.max(1, Math.min(4, v.scale * factor));
+    if (!rect) {
+      applyView({ ...v, scale: newScale });
+      return;
+    }
+    const cx = rect.width / 2,
+      cy = rect.height / 2;
+    const k = newScale / v.scale;
+    applyView({ scale: newScale, tx: cx - (cx - v.tx) * k, ty: cy - (cy - v.ty) * k });
+  };
+  const broadcastCursor = (clientX: number, clientY: number) => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect || !hasMe) return;
+    const { scale, tx, ty } = viewRef.current;
+    const x = (clientX - rect.left - tx) / (rect.width * scale);
+    const y = (clientY - rect.top - ty) / (rect.height * scale);
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    setMyPos({ x, y });
+    const now = Date.now();
+    if (now - lastSentRef.current < 45) return;
+    lastSentRef.current = now;
+    chanRef.current?.send({ type: "broadcast", event: "cursor", payload: { id: me!.id, name: me!.name, initials: initials(me!.name), x, y, active: true } });
+  };
+  const onMapPointerDown = (e: React.PointerEvent) => {
+    dragRef.current = { x: e.clientX, y: e.clientY, moved: false };
+  };
+  const onMapPointerMove = (e: React.PointerEvent) => {
+    if (dragRef.current) {
+      const dx = e.clientX - dragRef.current.x;
+      const dy = e.clientY - dragRef.current.y;
+      dragRef.current = { x: e.clientX, y: e.clientY, moved: true };
+      const v = viewRef.current;
+      applyView({ scale: v.scale, tx: v.tx + dx, ty: v.ty + dy });
+    }
+    broadcastCursor(e.clientX, e.clientY);
+  };
+  const onMapPointerUp = () => {
+    dragRef.current = null;
+  };
 
   /* -------------------------------- render ------------------------------- */
 
@@ -817,9 +866,17 @@ export default function MagrinHome() {
                         : "Balade-toi sur la carte — les autres te voient en direct 👀"}
                     </div>
 
-                    <div ref={mapRef} style={{ ...css("position:relative; width:100%; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);"), touchAction: "none" }}>
+                    <div
+                      ref={mapRef}
+                      onPointerDown={onMapPointerDown}
+                      onPointerMove={onMapPointerMove}
+                      onPointerUp={onMapPointerUp}
+                      onPointerLeave={onMapPointerUp}
+                      style={{ ...css("position:relative; width:100%; aspect-ratio:736/770; border-radius:8px; overflow:hidden; box-shadow:0 20px 50px -28px rgba(0,0,0,.6); border:1px solid rgba(62,82,38,.25);"), touchAction: "none", cursor: view.scale > 1 ? "grab" : "crosshair" }}
+                    >
+                      <div style={{ position: "absolute", inset: 0, transformOrigin: "0 0", transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})` }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/assets/farm-aerial.png" alt="Vue aérienne de la ferme de Magrin" style={css("position:absolute; inset:0; width:100%; height:100%; object-fit:cover;")} />
+                  <img src="/assets/farm-aerial.png" alt="Vue aérienne de la ferme de Magrin" style={css("position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none;")} />
 
                   <div style={css("position:absolute; left:14%; top:23%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:5px;")}>
                     <span style={css("background:rgba(36,58,86,.92); color:#eaf2fb; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; padding:4px 10px; border-radius:999px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.5);")}>Le lac</span>
@@ -853,7 +910,7 @@ export default function MagrinHome() {
                         position: "absolute",
                         left: `${p.x * 100}%`,
                         top: `${p.y * 100}%`,
-                        transform: "translate(-50%,-50%)",
+                        transform: `translate(-50%,-50%) scale(${1 / view.scale})`,
                         zIndex: 7,
                         pointerEvents: "none",
                         transition: "left .08s linear, top .08s linear",
@@ -867,8 +924,20 @@ export default function MagrinHome() {
                       <span style={css("font-family:'Caveat',cursive; font-size:15px; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85); white-space:nowrap;")}>{p.name}</span>
                     </div>
                   ))}
+                  {myPos && (
+                    <div style={{ position: "absolute", left: `${myPos.x * 100}%`, top: `${myPos.y * 100}%`, transform: `translate(-50%,-50%) scale(${1 / view.scale})`, zIndex: 8, pointerEvents: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: "1px" }}>
+                      <span style={css("width:28px; height:28px; border-radius:50%; background:#3E5226; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:10px; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.55);")}>{initials(me!.name)}</span>
+                      <span style={css("font-family:'Caveat',cursive; font-size:15px; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85); white-space:nowrap;")}>toi</span>
+                    </div>
+                  )}
+                      </div>{/* fin monde déplaçable */}
 
-                  <div style={css("position:absolute; right:12px; bottom:11px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.16em; color:rgba(255,255,255,.9); text-transform:uppercase; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:4px;")}>La ferme de Magrin · vue du ciel</div>
+                  <div style={css("position:absolute; left:12px; bottom:11px; display:flex; gap:6px; z-index:9;")}>
+                    <button onClick={() => zoomBy(1.4)} aria-label="Zoomer" style={css("width:34px; height:34px; border-radius:8px; border:none; background:rgba(42,58,25,.92); color:#F3EEDF; font-size:18px; cursor:pointer; line-height:1;")}>+</button>
+                    <button onClick={() => zoomBy(1 / 1.4)} aria-label="Dézoomer" style={css("width:34px; height:34px; border-radius:8px; border:none; background:rgba(42,58,25,.92); color:#F3EEDF; font-size:18px; cursor:pointer; line-height:1;")}>−</button>
+                  </div>
+
+                  <div style={css("position:absolute; right:12px; bottom:11px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.16em; color:rgba(255,255,255,.9); text-transform:uppercase; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:4px; pointer-events:none;")}>La ferme de Magrin · vue du ciel</div>
                 </div>
 
                   </div>
