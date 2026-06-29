@@ -215,6 +215,32 @@ function fileToDataURL(file: File, maxDim = 900, quality = 0.72): Promise<string
   });
 }
 
+function Coin({ size = 16, spin = false }: { size?: number; spin?: boolean }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className={spin ? "coin-spin" : undefined}
+      style={{ display: "inline-block", verticalAlign: "-0.15em", flexShrink: 0 }}
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id="magrinCoinGrad" cx="38%" cy="30%" r="78%">
+          <stop offset="0%" stopColor="#fff6cf" />
+          <stop offset="45%" stopColor="#fbcf45" />
+          <stop offset="100%" stopColor="#e6921c" />
+        </radialGradient>
+      </defs>
+      <circle cx="12" cy="12" r="11" fill="#9c5e12" />
+      <circle cx="12" cy="12" r="10" fill="url(#magrinCoinGrad)" />
+      <circle cx="12" cy="12" r="7.6" fill="none" stroke="#d98c1c" strokeWidth="1.2" opacity="0.7" />
+      <path d="M12 6.4l1.5 3.1 3.4.5-2.5 2.4.6 3.4-3-1.6-3 1.6.6-3.4-2.5-2.4 3.4-.5z" fill="#fff7d6" />
+      <ellipse cx="8.8" cy="8.2" rx="2.4" ry="1.3" fill="#ffffff" opacity="0.6" />
+    </svg>
+  );
+}
+
 function bottomTabStyle(active: boolean): CSSProperties {
   return {
     flex: "1",
@@ -271,6 +297,8 @@ export default function MagrinHome() {
   const [newQuestTitle, setNewQuestTitle] = useState("");
   const [newQuestPoints, setNewQuestPoints] = useState("5");
   const [newQuestSlots, setNewQuestSlots] = useState("");
+  const [reward, setReward] = useState<number | null>(null);
+  const rewardTimer = useRef<number | null>(null);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -455,6 +483,10 @@ export default function MagrinHome() {
       if (qq) qq.claims = next.claims;
     });
     store.upsertQuest(next);
+    // récompense satisfaisante 🪙
+    setReward(q.points);
+    if (rewardTimer.current) window.clearTimeout(rewardTimer.current);
+    rewardTimer.current = window.setTimeout(() => setReward(null), 1500);
   };
   const addQuest = () => {
     if (!meId) return;
@@ -841,7 +873,7 @@ export default function MagrinHome() {
               <button onClick={() => setActiveTab("planning")} style={tabStyle(tab === "planning")}>Planning</button>
               <button onClick={() => setActiveTab("social")} style={tabStyle(tab === "social")}>Social</button>
               <button onClick={() => setActiveTab("classement")} style={tabStyle(tab === "classement")}>Classement</button>
-              <button onClick={() => setActiveTab("coins")} style={tabStyle(tab === "coins")}>🪙 Coins</button>
+              <button onClick={() => setActiveTab("coins")} style={{ ...tabStyle(tab === "coins"), display: "inline-flex", alignItems: "center", gap: "5px" }}><Coin size={15} /> Coins</button>
             </nav>
             <div style={css("display:flex; align-items:center; gap:10px;")}>
               <span style={css("width:34px; height:34px; border-radius:50%; background:#6E8B3A; color:#F3EEDF; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:12px;")}>{initials(me!.name)}</span>
@@ -1220,23 +1252,23 @@ export default function MagrinHome() {
               <div style={css("max-width:760px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
                 <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Entre nous</div>
                 <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>Le classement 🏆</h2>
-                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Plus tu participes, plus tu gagnes de 🪙. Organise des créneaux, rejoins des équipes, et réserve ton train tôt !</p>
+                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Plus tu participes, plus tu gagnes de pièces <Coin size={16} />. Organise des créneaux, rejoins des équipes, et réserve ton train tôt !</p>
 
                 <div style={css("display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:26px;")}>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🍽️ +10 🪙</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🍽️ +10 <Coin size={18} /></div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par créneau organisé (chef·fe)</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🤝 +4 🪙</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🤝 +4 <Coin size={18} /></div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>par équipe rejointe</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🚗 +5 🪙</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>🚗 +5 <Coin size={18} /></div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>train renseigné (covoit)</div>
                   </div>
                   <div style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:6px; padding:14px;")}>
-                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>⚡ +5/3/1 🪙</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:20px;")}>⚡ +5/3/1 <Coin size={18} /></div>
                     <div style={css("font-size:15px; color:rgba(36,40,28,.7);")}>aux 3 trains réservés les plus tôt</div>
                   </div>
                 </div>
@@ -1259,13 +1291,13 @@ export default function MagrinHome() {
                               {r.teams > 0 && <span>🤝 {r.teams}</span>}
                               {r.trainPts > 0 && <span>🚗</span>}
                               {r.speed > 0 && <span>⚡ +{r.speed}</span>}
-                              {r.questPts > 0 && <span>🪙 +{r.questPts}</span>}
-                              {r.total === 0 && <span>en attente de 🪙…</span>}
+                              {r.questPts > 0 && <span style={{ display: "inline-flex", alignItems: "center", gap: "3px" }}><Coin size={11} /> +{r.questPts}</span>}
+                              {r.total === 0 && <span style={{ display: "inline-flex", alignItems: "center", gap: "3px" }}>en attente de <Coin size={11} />…</span>}
                             </div>
                           </div>
                           <div style={css("text-align:right; flex-shrink:0;")}>
-                            <div style={css("font-family:'DM Serif Display',serif; font-size:26px; line-height:1; color:#3E5226;")}>{r.total}</div>
-                            <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>🪙 coins</div>
+                            <div style={{ ...css("font-family:'DM Serif Display',serif; font-size:26px; line-height:1; color:#3E5226;"), display: "inline-flex", alignItems: "center", gap: "4px" }}><Coin size={22} spin={i === 0} /> {r.total}</div>
+                            <div style={css("font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>coins</div>
                           </div>
                         </div>
                       );
@@ -1279,8 +1311,19 @@ export default function MagrinHome() {
             {tab === "coins" && (
               <div style={css("max-width:760px; margin:0 auto; padding:40px clamp(16px,3vw,28px) 56px")}>
                 <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.26em; color:#6E8B3A; text-transform:uppercase;")}>Get some coins</div>
-                <h2 style={css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 4px; line-height:1.05;")}>Les quêtes 🪙</h2>
-                <p style={css("font-size:19px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Fais une quête, prends une photo en preuve 📷, et empoche des 🪙 (ça compte dans le classement). Tu peux aussi créer ta propre quête si tu as fait un truc bien !</p>
+                <h2 style={{ ...css("font-family:'DM Serif Display',serif; font-size:clamp(28px,4.6vw,44px); margin:6px 0 16px; line-height:1.05;"), display: "flex", alignItems: "center", gap: "10px" }}>Les quêtes <Coin size={34} /></h2>
+
+                {/* ton trésor */}
+                <div style={css("display:flex; align-items:center; gap:18px; background:linear-gradient(135deg,#3E5226,#2A3A19); color:#F3EEDF; border-radius:14px; padding:18px 24px; margin-bottom:20px; box-shadow:0 18px 40px -26px rgba(0,0,0,.6);")}>
+                  <div style={{ perspective: "300px" }}><Coin size={58} spin /></div>
+                  <div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:#C9D596;")}>Ton trésor</div>
+                    <div style={css("font-family:'DM Serif Display',serif; font-size:42px; line-height:1;")}>{ranking.find((r) => hasMe && r.id === me!.id)?.total ?? 0}</div>
+                    <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:rgba(243,238,223,.7);")}>coins gagnés</div>
+                  </div>
+                </div>
+
+                <p style={css("font-size:18px; line-height:1.45; max-width:560px; color:rgba(36,40,28,.75); margin:0 0 22px;")}>Fais une quête, prends une photo en preuve 📷, et empoche des pièces (ça compte dans le classement). Tu peux aussi créer ta propre quête si tu as fait un truc bien !</p>
 
                 {!showQuestForm ? (
                   <button onClick={() => setShowQuestForm(true)} className="mgr-prop" style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; padding:11px 18px; border:none; border-radius:4px; background:#6E8B3A; color:#F3EEDF; cursor:pointer; margin-bottom:22px;")}>+ Créer une quête</button>
@@ -1289,7 +1332,7 @@ export default function MagrinHome() {
                     <input value={newQuestTitle} onChange={(e) => setNewQuestTitle(e.target.value)} placeholder="Titre de la quête (ex : sortir les poubelles)" style={css("width:100%; font-family:'Cormorant Garamond',serif; font-size:18px; padding:10px 12px; border:1px solid rgba(62,82,38,.3); border-radius:4px; outline:none;")} />
                     <div style={css("display:flex; gap:10px; flex-wrap:wrap;")}>
                       <label style={css("flex:1; min-width:120px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#6E8B3A;")}>
-                        🪙 Points
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}><Coin size={13} /> Points</span>
                         <input type="number" min="1" max="50" value={newQuestPoints} onChange={(e) => setNewQuestPoints(e.target.value)} style={css("display:block; width:100%; margin-top:4px; font-family:'Space Mono',monospace; font-size:16px; padding:8px 10px; border:1px solid rgba(62,82,38,.3); border-radius:4px; outline:none; color:#241B16;")} />
                       </label>
                       <label style={css("flex:1; min-width:120px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#6E8B3A;")}>
@@ -1310,16 +1353,22 @@ export default function MagrinHome() {
                     const full = q.slots != null && q.claims.length >= q.slots;
                     const progress = q.slots != null ? `${q.claims.length}/${q.slots} fait${q.claims.length > 1 ? "s" : ""}` : `${q.claims.length} fait${q.claims.length > 1 ? "s" : ""}`;
                     return (
-                      <div key={q.id} style={css("background:#fff; border:1px solid rgba(62,82,38,.16); border-radius:8px; padding:16px 18px; box-shadow:0 14px 30px -24px rgba(0,0,0,.4);")}>
+                      <div key={q.id} style={{ ...css("border-radius:8px; padding:16px 18px; box-shadow:0 14px 30px -24px rgba(0,0,0,.4);"), background: claimed ? "linear-gradient(135deg,#fff8e1,#fce8b6)" : "#fff", border: claimed ? "1px solid #e6b800" : "1px solid rgba(62,82,38,.16)" }}>
                         <div style={css("display:flex; align-items:flex-start; gap:12px;")}>
                           <div style={css("flex:1; min-width:0;")}>
                             <div style={css("font-family:'DM Serif Display',serif; font-size:21px; line-height:1.15;")}>{q.title}</div>
-                            <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.06em; color:rgba(36,40,28,.55); margin-top:3px;")}>🪙 +{q.points} · {progress}</div>
+                            <div style={{ ...css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.06em; color:rgba(36,40,28,.55); margin-top:3px;"), display: "flex", alignItems: "center", gap: "5px" }}><Coin size={13} /> +{q.points} · {progress}</div>
                           </div>
                           {q.createdBy && hasMe && q.createdBy === me!.id && (
                             <button onClick={() => { if (window.confirm("Supprimer cette quête ?")) removeQuest(q.id); }} title="Supprimer" style={css("background:none; border:none; cursor:pointer; font-size:14px; color:#9d3b2a; flex-shrink:0;")}>🗑</button>
                           )}
                         </div>
+
+                        {q.slots != null && (
+                          <div style={css("height:7px; border-radius:999px; background:rgba(62,82,38,.14); overflow:hidden; margin-top:11px;")}>
+                            <div style={{ height: "100%", borderRadius: "999px", background: full ? "#e6b800" : "#6E8B3A", width: `${Math.min(100, (q.claims.length / q.slots) * 100)}%`, transition: "width .3s ease" }} />
+                          </div>
+                        )}
 
                         {q.claims.length > 0 && (
                           <div style={css("display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;")}>
@@ -1339,7 +1388,7 @@ export default function MagrinHome() {
 
                         <div style={css("margin-top:14px;")}>
                           {claimed ? (
-                            <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#3E5226;")}>✓ Quête validée — 🪙 +{q.points}</div>
+                            <div style={{ ...css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#a87800;"), display: "inline-flex", alignItems: "center", gap: "5px" }}>✓ Validée — <Coin size={13} /> +{q.points}</div>
                           ) : full ? (
                             <div style={css("font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(36,40,28,.45);")}>Complet — plus de place</div>
                           ) : (
@@ -1366,7 +1415,7 @@ export default function MagrinHome() {
             <button onClick={() => setActiveTab("planning")} style={bottomTabStyle(tab === "planning")}>Planning</button>
             <button onClick={() => setActiveTab("social")} style={bottomTabStyle(tab === "social")}>Social</button>
             <button onClick={() => setActiveTab("classement")} style={bottomTabStyle(tab === "classement")}>🏆</button>
-            <button onClick={() => setActiveTab("coins")} style={bottomTabStyle(tab === "coins")}>🪙</button>
+            <button onClick={() => setActiveTab("coins")} style={bottomTabStyle(tab === "coins")}><Coin size={22} /></button>
           </div>
         </>
       )}
@@ -1484,6 +1533,38 @@ export default function MagrinHome() {
             <div style={css("text-align:center; margin-top:14px;")}>
               <button onClick={() => { setModalStep("onboard"); setObStep(1); }} style={css("background:none; border:none; cursor:pointer; font-family:'Space Mono',monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:rgba(62,82,38,.7); text-decoration:underline; text-underline-offset:3px;")}>Pas encore de compte ? Je m&apos;inscris</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== récompense quête : pluie de pièces ===== */}
+      {reward != null && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, pointerEvents: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div className="coin-pop">
+              <Coin size={96} />
+            </div>
+            <div className="coin-float" style={{ position: "absolute", top: "-10px", fontFamily: "'DM Serif Display',serif", fontSize: "40px", color: "#3E5226", textShadow: "0 2px 0 #fff" }}>
+              +{reward}
+            </div>
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <div
+                key={i}
+                className="coin-burst"
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  marginLeft: "-16px",
+                  marginTop: "-16px",
+                  ["--bx" as string]: `${Math.round(Math.cos((i / 8) * Math.PI * 2) * 150)}px`,
+                  ["--by" as string]: `${Math.round(Math.sin((i / 8) * Math.PI * 2) * 150)}px`,
+                  animationDelay: `${i * 0.03}s`,
+                }}
+              >
+                <Coin size={32} />
+              </div>
+            ))}
           </div>
         </div>
       )}
