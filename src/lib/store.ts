@@ -22,8 +22,10 @@ export const emptyData = (): Data => ({ guests: [], evenings: {}, messages: [] }
 
 /* --------------------------- supabase client ---------------------------- */
 
-const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// La clé "publishable" est publique par conception (protégée par les règles RLS de la base).
+// On la met en valeur par défaut pour que le partage marche partout sans config supplémentaire.
+const URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://psbxaoxubacycgweqvpi.supabase.co";
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_fwQfCzaRftwDWQpwR0pWEw_7be7wiJ6";
 export const isRemote = !!(URL && ANON);
 const sb: SupabaseClient | null = isRemote ? createClient(URL!, ANON!) : null;
 

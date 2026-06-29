@@ -1,17 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "export",
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "books.google.com",
-      },
-      {
-        protocol: "https",
-        hostname: "covers.openlibrary.org",
-      },
-    ],
+    unoptimized: true,
   },
 };
 
